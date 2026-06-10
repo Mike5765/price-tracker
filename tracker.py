@@ -14,7 +14,17 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "DNT": "1",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "max-age=0",
 }
 
 
@@ -62,9 +72,14 @@ def save_price(product_name, price):
     conn.close()
 
 
-def scrape_price(url):
+def _extract_asin(url):
+    match = re.search(r"/dp/([A-Z0-9]{10})", url)
+    return match.group(1) if match else None
+
+
+def _scrape_amazon(url):
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
+        response = requests.get(url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(response.text, "lxml")
 
         price_whole = soup.select_one("span.a-price-whole")
@@ -83,7 +98,67 @@ def scrape_price(url):
                 return float(match.group())
 
     except Exception as e:
-        print(f"[ERROR] Failed to scrape {url}: {e}")
+        print(f"[ERROR] Amazon scrape failed: {e}")
+
+    return None
+
+
+def _scrape_camelcamelcamel(asin):
+    url = f"https://camelcamelcamel.com/product/{asin}"
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        soup = BeautifulSoup(response.text, "lxml")
+
+        # Current price shown in the product price table
+        for row in soup.select("table.product_prices tr, #product_prices tr"):
+            cells = row.select("td, th")
+            if len(cells) >= 2:
+                price_text = cells[-1].get_text(strip=True)
+                match = re.search(r"\$([\d,]+\.\d{2})", price_text)
+                if match:
+                    val = float(match.group(1).replace(",", ""))
+                    if 5 < val < 10000:
+                        return val
+
+        # Fallback: find any price-like link pointing to Amazon
+        for a in soup.select("a[href*='amazon.com']"):
+            text = a.get_text(strip=True)
+            match = re.search(r"\$([\d,]+\.\d{2})", text)
+            if match:
+                val = float(match.group(1).replace(",", ""))
+                if 5 < val < 10000:
+                    return val
+
+        # Last resort: scan all text for dollar amounts near "Amazon"
+        for tag in soup.select("[class*='price'], [id*='price']"):
+            text = tag.get_text(strip=True)
+            match = re.search(r"\$([\d,]+\.\d{2})", text)
+            if match:
+                val = float(match.group(1).replace(",", ""))
+                if 5 < val < 10000:
+                    return val
+
+    except Exception as e:
+        print(f"[ERROR] CamelCamelCamel scrape failed: {e}")
+
+    return None
+
+
+def scrape_price(url):
+    # Try Amazon directly first
+    price = _scrape_amazon(url)
+    if price:
+        print(f"  [source: Amazon]")
+        return price
+
+    # Amazon blocked this IP (common on cloud servers) — try CamelCamelCamel
+    asin = _extract_asin(url)
+    if asin:
+        print(f"  Amazon unavailable, trying CamelCamelCamel (ASIN: {asin})...")
+        price = _scrape_camelcamelcamel(asin)
+        if price:
+            print(f"  [source: CamelCamelCamel]")
+            return price
 
     return None
 
