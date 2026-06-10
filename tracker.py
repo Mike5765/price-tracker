@@ -3,9 +3,10 @@ import sqlite3
 import schedule
 import time
 import re
+import anthropic
 from bs4 import BeautifulSoup
 from datetime import datetime
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PRODUCTS, CHECK_INTERVAL
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY, PRODUCTS, CHECK_INTERVAL
 
 HEADERS = {
     "User-Agent": (
@@ -41,6 +42,16 @@ def get_last_price(product_name):
     return row[0] if row else None
 
 
+def get_price_history(product_name, limit=10):
+    conn = sqlite3.connect("prices.db")
+    rows = conn.execute(
+        "SELECT price, checked_at FROM price_history WHERE product_name = ? ORDER BY checked_at DESC LIMIT ?",
+        (product_name, limit)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def save_price(product_name, price):
     conn = sqlite3.connect("prices.db")
     conn.execute(
@@ -56,7 +67,6 @@ def scrape_price(url):
         response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, "lxml")
 
-        # Try the main price span Amazon uses
         price_whole = soup.select_one("span.a-price-whole")
         price_fraction = soup.select_one("span.a-price-fraction")
 
@@ -65,7 +75,6 @@ def scrape_price(url):
             fraction = price_fraction.get_text(strip=True) if price_fraction else "00"
             return float(f"{whole}.{fraction}")
 
-        # Fallback: search for any price-like text
         price_tag = soup.select_one("#priceblock_ourprice, #priceblock_dealprice, .a-offscreen")
         if price_tag:
             text = price_tag.get_text(strip=True)
@@ -77,6 +86,37 @@ def scrape_price(url):
         print(f"[ERROR] Failed to scrape {url}: {e}")
 
     return None
+
+
+def get_ai_analysis(product_name, current_price, history):
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        history_text = "\n".join(
+            [f"  ${price:.2f} on {checked_at[:10]}" for price, checked_at in history]
+        )
+
+        message = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=300,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"You are a price tracking assistant. Analyze this price data and give a short buy recommendation.\n\n"
+                        f"Product: {product_name}\n"
+                        f"Current price: ${current_price:.2f}\n"
+                        f"Recent price history (newest first):\n{history_text}\n\n"
+                        f"In 2-3 sentences: Is this a good time to buy? Is the price trending up or down? "
+                        f"Keep it concise and practical."
+                    )
+                }
+            ]
+        )
+        return message.content[0].text
+    except Exception as e:
+        print(f"[ERROR] AI analysis failed: {e}")
+        return None
 
 
 def send_telegram(message):
@@ -101,19 +141,26 @@ def check_prices():
 
         last_price = get_last_price(name)
         save_price(name, price)
+        history = get_price_history(name)
 
         print(f"  {name}: ${price:.2f} (was: {'N/A' if last_price is None else f'${last_price:.2f}'})")
 
+        ai_note = get_ai_analysis(name, price, history)
+
         if last_price is None:
-            send_telegram(
+            msg = (
                 f"*Price Tracker Started*\n\n"
                 f"*{name}*\n"
                 f"Current price: *${price:.2f}*\n"
                 f"I'll notify you whenever the price changes."
             )
+            if ai_note:
+                msg += f"\n\n*AI Analysis:*\n{ai_note}"
+            send_telegram(msg)
+
         elif price < last_price:
             diff = last_price - price
-            send_telegram(
+            msg = (
                 f"*Price Drop!*\n\n"
                 f"*{name}*\n"
                 f"Was: ${last_price:.2f}\n"
@@ -121,20 +168,27 @@ def check_prices():
                 f"You save: *${diff:.2f}*\n\n"
                 f"[View on Amazon]({url})"
             )
+            if ai_note:
+                msg += f"\n\n*AI Analysis:*\n{ai_note}"
+            send_telegram(msg)
+
         elif price > last_price:
             diff = price - last_price
-            send_telegram(
+            msg = (
                 f"*Price Increase*\n\n"
                 f"*{name}*\n"
                 f"Was: ${last_price:.2f}\n"
                 f"Now: *${price:.2f}* (+${diff:.2f})\n\n"
                 f"[View on Amazon]({url})"
             )
+            if ai_note:
+                msg += f"\n\n*AI Analysis:*\n{ai_note}"
+            send_telegram(msg)
 
 
 if __name__ == "__main__":
     init_db()
-    check_prices()  # Run once immediately on start
+    check_prices()
     schedule.every(CHECK_INTERVAL).minutes.do(check_prices)
     print(f"Scheduler running — checking every {CHECK_INTERVAL} minutes. Press Ctrl+C to stop.")
     while True:

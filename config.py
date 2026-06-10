@@ -1,5 +1,8 @@
-TELEGRAM_TOKEN = "8881909715:AAEgEEdVJb-MwcD6H5cvOTM5Jyn63cz3e1c"
-TELEGRAM_CHAT_ID = "8981066521"
+import os
+
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
+TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 PRODUCTS = [
     {
@@ -8,5 +11,4 @@ PRODUCTS = [
     }
 ]
 
-# How often to check prices (in minutes)
 CHECK_INTERVAL = 60
