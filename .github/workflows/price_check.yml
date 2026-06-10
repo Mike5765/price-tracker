@@ -2,8 +2,8 @@ name: Price Tracker
 
 on:
   schedule:
-    - cron: '0 * * * *'  # runs every hour
-  workflow_dispatch:       # allows manual trigger from GitHub
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   check-prices:
@@ -33,8 +33,4 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python -c "
-from tracker import init_db, check_prices
-init_db()
-check_prices()
-"
+        run: python run_check.py
