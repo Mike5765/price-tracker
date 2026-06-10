@@ -7,7 +7,7 @@ import anthropic
 from bs4 import BeautifulSoup
 from datetime import datetime
 import urllib.parse
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY, BESTBUY_API_KEY, PRODUCTS, CHECK_INTERVAL
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY, SCRAPERAPI_KEY, PRODUCTS, CHECK_INTERVAL
 
 HEADERS = {
     "User-Agent": (
@@ -145,46 +145,28 @@ def _scrape_camelcamelcamel(asin):
     return None
 
 
-def _get_bestbuy_price(search_term):
-    if not BESTBUY_API_KEY:
-        return None
-    try:
-        query = urllib.parse.quote(search_term)
-        url = (
-            f"https://api.bestbuy.com/v1/products(search={query})?"
-            f"show=sku,name,salePrice&format=json&pageSize=1&apiKey={BESTBUY_API_KEY}"
-        )
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        products = data.get("products", [])
-        if products:
-            price = products[0].get("salePrice")
-            name = products[0].get("name", "")
-            print(f"  BestBuy match: {name}")
-            return float(price) if price else None
-    except Exception as e:
-        print(f"[ERROR] BestBuy API failed: {e}")
-    return None
+def _proxied_url(url):
+    if SCRAPERAPI_KEY:
+        encoded = urllib.parse.quote(url)
+        return f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY}&url={encoded}"
+    return url
 
 
-def scrape_price(url, bestbuy_search=None):
-    # Try BestBuy API first (works on cloud servers, no IP blocking)
-    if bestbuy_search:
-        price = _get_bestbuy_price(bestbuy_search)
-        if price:
-            print(f"  [source: BestBuy API]")
-            return price
+def scrape_price(url, **_):
+    # When SCRAPERAPI_KEY is set, route through ScraperAPI residential proxies
+    # (bypasses Amazon's datacenter IP blocks on GitHub Actions)
+    fetch_url = _proxied_url(url)
+    source = "ScraperAPI→Amazon" if SCRAPERAPI_KEY else "Amazon"
 
-    # Try Amazon directly
-    price = _scrape_amazon(url)
+    price = _scrape_amazon(fetch_url)
     if price:
-        print(f"  [source: Amazon]")
+        print(f"  [source: {source}]")
         return price
 
-    # Amazon blocked this IP (common on cloud servers) — try CamelCamelCamel
+    # Fallback: CamelCamelCamel (no proxy needed)
     asin = _extract_asin(url)
     if asin:
-        print(f"  Amazon unavailable, trying CamelCamelCamel (ASIN: {asin})...")
+        print(f"  Primary unavailable, trying CamelCamelCamel (ASIN: {asin})...")
         price = _scrape_camelcamelcamel(asin)
         if price:
             print(f"  [source: CamelCamelCamel]")
@@ -238,7 +220,7 @@ def check_prices():
     for product in PRODUCTS:
         name = product["name"]
         url = product["url"]
-        price = scrape_price(url, bestbuy_search=product.get("bestbuy_search"))
+        price = scrape_price(url)
 
         if price is None:
             print(f"  Could not retrieve price for {name}")
