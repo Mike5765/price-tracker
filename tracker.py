@@ -246,14 +246,14 @@ def check_prices():
         retail_line = f"Retail (MSRP): ${retail_price:.2f}\n" if retail_price else ""
         start_line = f"When we started tracking: ${tracking_start_price:.2f}\n" if tracking_start_price else ""
 
-        if last_price is None:
+        if last_price is None or price == last_price:
             msg = (
-                f"*Price Tracker Started*\n\n"
+                f"*Price Check (Test)*\n\n"
                 f"*{name}*\n"
                 f"{retail_line}"
                 f"{start_line}"
                 f"Current price: *${price:.2f}*\n"
-                f"I'll notify you whenever the price changes."
+                f"Price is unchanged — tracker is working."
             )
             if ai_note:
                 msg += f"\n\n*AI Analysis:*\n{ai_note}"
