@@ -175,7 +175,7 @@ def scrape_price(url, **_):
     return None
 
 
-def get_ai_analysis(product_name, current_price, history, retail_price=None, tracking_start_price=None):
+def get_ai_analysis(product_name, current_price, history, retail_price=None):
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -186,8 +186,6 @@ def get_ai_analysis(product_name, current_price, history, retail_price=None, tra
         context = ""
         if retail_price:
             context += f"MSRP / retail price: ${retail_price:.2f}\n"
-        if tracking_start_price:
-            context += f"Price when we started tracking: ${tracking_start_price:.2f}\n"
 
         message = client.messages.create(
             model="claude-haiku-4-5",
@@ -228,7 +226,6 @@ def check_prices():
         name = product["name"]
         url = product["url"]
         retail_price = product.get("retail_price")
-        tracking_start_price = product.get("tracking_start_price")
         price = scrape_price(url)
 
         if price is None:
@@ -241,19 +238,17 @@ def check_prices():
 
         print(f"  {name}: ${price:.2f} (was: {'N/A' if last_price is None else f'${last_price:.2f}'})")
 
-        ai_note = get_ai_analysis(name, price, history, retail_price, tracking_start_price)
+        ai_note = get_ai_analysis(name, price, history, retail_price)
 
         retail_line = f"Retail (MSRP): ${retail_price:.2f}\n" if retail_price else ""
-        start_line = f"When we started tracking: ${tracking_start_price:.2f}\n" if tracking_start_price else ""
 
-        if last_price is None or price == last_price:
+        if last_price is None:
             msg = (
-                f"*Price Check (Test)*\n\n"
+                f"*Price Tracker Started*\n\n"
                 f"*{name}*\n"
                 f"{retail_line}"
-                f"{start_line}"
                 f"Current price: *${price:.2f}*\n"
-                f"Price is unchanged — tracker is working."
+                f"I'll notify you whenever the price changes."
             )
             if ai_note:
                 msg += f"\n\n*AI Analysis:*\n{ai_note}"
@@ -265,7 +260,6 @@ def check_prices():
                 f"*Price Drop!*\n\n"
                 f"*{name}*\n"
                 f"{retail_line}"
-                f"{start_line}"
                 f"Was: ${last_price:.2f}\n"
                 f"Now: *${price:.2f}*\n"
                 f"You save: *${diff:.2f}*\n\n"
@@ -281,7 +275,6 @@ def check_prices():
                 f"*Price Increase*\n\n"
                 f"*{name}*\n"
                 f"{retail_line}"
-                f"{start_line}"
                 f"Was: ${last_price:.2f}\n"
                 f"Now: *${price:.2f}* (+${diff:.2f})\n\n"
                 f"[View on Amazon]({url})"
